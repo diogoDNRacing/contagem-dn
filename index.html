@@ -40,6 +40,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 <body>
 <main>
 <h1>Leitor de código de barras → SKU</h1>
+<div class="hint" id="sync" style="margin:-6px 0 10px">Conectando…</div>
 
 <div class="card">
   <button id="btnCam" style="width:100%">Abrir câmera</button>
@@ -96,8 +97,14 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 (function(){
+  // ====== CONFIGURE AQUI (Supabase > Project Settings > API) ======
+  var SUPABASE_URL="https://idzzsyiwaidpgngnwazm.supabase.co";
+  var SUPABASE_KEY="sb_publishable_2wyLusOzhM-3fU9FoRtWMA_IG2ynr7-";
+  // ================================================================
+  var sb=null;
   var K_ITEMS="lcb-items-v2",K_MAP="lcb-map-v2",K_CAT="lcb-cat-v2";
   var items=[];   // {sku, qty}
   var map={};     // codigo de barras -> sku
@@ -106,7 +113,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   var $=function(id){return document.getElementById(id)};
 
   function ld(k,def){try{var r=localStorage.getItem(k);if(r){var v=JSON.parse(r);if(v)return v;}}catch(e){}return def;}
-  function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+  function sv(){}
   function say(id,t,cls){var el=$(id);el.textContent=t||"";el.className="msg"+(cls?" "+cls:"");}
   function norm(s){return String(s==null?"":s).trim();}
 
@@ -126,11 +133,11 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
       if(cat[it.sku]){var sm=document.createElement("small");sm.textContent=cat[it.sku];c1.appendChild(sm);}
       var c2=document.createElement("td");
       var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="1";inp.inputMode="numeric";inp.value=it.qty;
-      inp.addEventListener("change",function(){var v=parseInt(inp.value,10);if(isNaN(v)||v<0){inp.value=it.qty;return;}it.qty=v;sv(K_ITEMS,items);render();});
+      inp.addEventListener("change",function(){var v=parseInt(inp.value,10);if(isNaN(v)||v<0){inp.value=it.qty;return;}it.qty=v;render();db(sb.from("contagem").upsert({sku:it.sku,qty:v,updated_at:new Date().toISOString()}));});
       c2.appendChild(inp);
       var c3=document.createElement("td");
       var b=document.createElement("button");b.className="del";b.textContent="Remover";
-      b.addEventListener("click",function(){items.splice(i,1);sv(K_ITEMS,items);render();});
+      b.addEventListener("click",function(){var sk=it.sku;items.splice(i,1);render();db(sb.from("contagem").delete().eq("sku",sk));});
       c3.appendChild(b);
       tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tb.appendChild(tr);
     });
@@ -159,11 +166,12 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     if(!sku){say("addMsg","Informe o SKU (ou leia um código já associado).","err");return;}
     if(isNaN(qty)||qty<=0){say("addMsg","Quantidade inválida.","err");return;}
     var novoMap=false;
-    if(code&&code!==sku&&map[code]!==sku){novoMap=!map[code];map[code]=sku;sv(K_MAP,map);}
+    if(code&&code!==sku&&map[code]!==sku){novoMap=!map[code];map[code]=sku;db(sb.from("codigos").upsert({codigo:code,sku:sku}));}
     var found=items.find(function(x){return x.sku===sku});
     var antes=found?found.qty:0;
     if(found)found.qty+=qty;else items.push({sku:sku,qty:qty});
-    sv(K_ITEMS,items);render();fillDatalist();
+    render();fillDatalist();
+    db(sb.rpc("add_qty",{p_sku:sku,p_qty:qty}).then(function(r){if(!r.error)loadContagem();return r;}));
     var txt=found?"SKU já existia: "+antes+" + "+qty+" = "+found.qty+" ("+sku+")":"Adicionado: "+sku+" (qtd "+qty+")";
     if(novoMap)txt+=" · código associado ao SKU";
     say("addMsg",txt,"ok");
@@ -198,6 +206,39 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     var s=scanner;scanner=null;scanning=false;locked=false;
     s.stop().catch(function(){}).then(function(){try{s.clear();}catch(e){}});
     $("reader").style.display="none";$("btnCam").textContent="Abrir câmera";say("camMsg","");
+  }
+
+  function db(p){return Promise.resolve(p).then(function(r){if(r&&r.error){$("sync").textContent="Erro ao salvar: "+r.error.message;}return r;});}
+  async function up(tabela,arr,chave){
+    var u={};arr.forEach(function(x){u[x[chave]]=x;});arr=Object.keys(u).map(function(k){return u[k];});
+    for(var i=0;i<arr.length;i+=500){var r=await sb.from(tabela).upsert(arr.slice(i,i+500));if(r.error){say("cadMsg","Erro ao salvar no servidor: "+r.error.message,"err");return;}}
+  }
+  async function loadContagem(){
+    var r=await sb.from("contagem").select("sku,qty").order("updated_at",{ascending:false}).limit(10000);
+    if(r.error){$("sync").textContent="Erro: "+r.error.message;return;}
+    items=r.data.map(function(x){return {sku:x.sku,qty:x.qty};});render();
+  }
+  async function loadCodigos(){
+    var r=await sb.from("codigos").select("codigo,sku").limit(100000);
+    if(r.error)return;map={};r.data.forEach(function(x){map[x.codigo]=x.sku;});fillDatalist();
+  }
+  async function loadCatalogo(){
+    var all=[],from=0;
+    while(true){var r=await sb.from("catalogo").select("sku,titulo").range(from,from+999);
+      if(r.error)return;all=all.concat(r.data);if(r.data.length<1000)break;from+=1000;}
+    cat={};all.forEach(function(x){cat[x.sku]=x.titulo||"";});fillDatalist();render();
+  }
+  function start(){
+    if(typeof supabase==="undefined"||SUPABASE_URL.indexOf("COLE_AQUI")>=0){$("sync").textContent="Configure SUPABASE_URL e SUPABASE_KEY no arquivo.";$("sync").style.color="var(--danger)";return;}
+    sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    Promise.all([loadCodigos(),loadCatalogo(),loadContagem()]);
+    var t={};
+    function deb(nome,fn){clearTimeout(t[nome]);t[nome]=setTimeout(fn,300);}
+    sb.channel("lcb")
+      .on("postgres_changes",{event:"*",schema:"public",table:"contagem"},function(){deb("c",loadContagem);})
+      .on("postgres_changes",{event:"*",schema:"public",table:"codigos"},function(){deb("m",loadCodigos);})
+      .on("postgres_changes",{event:"*",schema:"public",table:"catalogo"},function(){deb("t",loadCatalogo);})
+      .subscribe(function(st){$("sync").textContent=st==="SUBSCRIBED"?"Sincronizado em tempo real":"Conectando… ("+st+")";});
   }
 
   function stamp(){var d=new Date();function p(n){return String(n).padStart(2,"0")}return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());}
@@ -241,14 +282,15 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
         function idx(re){for(var i=0;i<h.length;i++){if(re.test(h[i]))return i;}return -1;}
         var iS=idx(/^sku$/),iT=idx(/t[ií]tulo|^nome|descri/),iB=idx(/barras|^ean|gtin|barcode/);
         if(iS<0){say("cadMsg","Não encontrei a coluna SKU no arquivo.","err");return;}
-        var nS=0,nB=0;
+        var nS=0,nB=0,rc=[],rm=[];
         for(var r=1;r<rows.length;r++){
           var sku=norm(rows[r][iS]);if(!sku)continue;
           if(!(sku in cat))nS++;
           cat[sku]=iT>=0?norm(rows[r][iT]):(cat[sku]||"");
-          if(iB>=0){var b=norm(rows[r][iB]);if(b){map[b]=sku;nB++;}}
+          rc.push({sku:sku,titulo:cat[sku]||""});
+          if(iB>=0){var b=norm(rows[r][iB]);if(b){map[b]=sku;rm.push({codigo:b,sku:sku});nB++;}}
         }
-        sv(K_CAT,cat);sv(K_MAP,map);fillDatalist();render();
+        fillDatalist();render();up("catalogo",rc,"sku");up("codigos",rm,"codigo");
         say("cadMsg",nS+" SKUs novos importados"+(iB>=0?" · "+nB+" códigos de barras associados":" · o arquivo não tem coluna de código de barras"),"ok");
       }catch(e){say("cadMsg","Não consegui ler este arquivo.","err");}
     };
@@ -274,14 +316,12 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   $("sku").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("qty").focus();$("qty").select();}});
   $("qty").addEventListener("keydown",function(e){if(e.key==="Enter")addItem();});
   $("btnXlsx").addEventListener("click",exportXlsx);
-  $("btnClear").addEventListener("click",function(){if(!items.length)return;if(confirm("Apagar toda a contagem atual? As associações de códigos são mantidas.")){items=[];sv(K_ITEMS,items);render();say("expMsg","");}});
+  $("btnClear").addEventListener("click",function(){if(!items.length)return;if(confirm("Apagar TODA a contagem para TODOS os usuários? As associações de códigos são mantidas.")){items=[];render();db(sb.from("contagem").delete().neq("sku",""));say("expMsg","");}});
   $("fileCad").addEventListener("change",function(e){importCad(e.target.files[0]);e.target.value="";});
   $("btnMapCsv").addEventListener("click",exportMap);
-  $("btnMapClear").addEventListener("click",function(){if(confirm("Apagar todas as associações código de barras → SKU?")){map={};sv(K_MAP,map);fillDatalist();say("cadMsg","Associações apagadas.");}});
+  $("btnMapClear").addEventListener("click",function(){if(confirm("Apagar todas as associações código de barras → SKU?")){map={};db(sb.from("codigos").delete().neq("codigo",""));fillDatalist();say("cadMsg","Associações apagadas.");}});
 
-  items=ld(K_ITEMS,[]);map=ld(K_MAP,{});cat=ld(K_CAT,{});
-  if(!Array.isArray(items))items=[];
-  fillDatalist();render();
+  fillDatalist();render();start();
 })();
 </script>
 </body>
