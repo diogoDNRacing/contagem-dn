@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leitor de código de barras → SKU</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1b1f24;--muted:#667085;--line:#e3e6ea;--accent:#0b6bcb;--accent-text:#fff;--danger:#c62828;--ok:#1b7f3b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1a1f26;--text:#e8eaed;--muted:#9aa3ad;--line:#2b323b;--accent:#4a9df8;--accent-text:#06121f;--danger:#ef6b6b;--ok:#5fcf80;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111418;--card:#1a1f26;--text:#e8eaed;--muted:#9aa3ad;--line:#2b323b;--accent:#4a9df8;--accent-text:#06121f;--danger:#ef6b6b;--ok:#5fcf80;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:1.25rem;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+button{font:inherit;border:0;border-radius:10px;padding:12px 16px;background:var(--accent);color:var(--accent-text);font-weight:600;cursor:pointer}
+button.sec{background:transparent;color:var(--text);border:1px solid var(--line)}
+button.del{background:transparent;color:var(--danger);padding:6px 10px}
+input[type=text],input[type=number]{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+label{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+.row{display:flex;gap:10px}.row>*{flex:1}
+#reader{width:100%;border-radius:10px;overflow:hidden;margin-top:10px;display:none}
+.msg{font-size:.9rem;margin-top:8px;min-height:1.2em}
+.msg.err{color:var(--danger)}.msg.ok{color:var(--ok)}
+.prod{font-size:.9rem;color:var(--muted);margin-top:6px;min-height:1.2em}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);font-size:.95rem;vertical-align:top}
+td small{display:block;color:var(--muted);font-size:.78rem}
+td input{padding:6px 8px;width:80px}
+.total{display:flex;justify-content:space-between;margin:10px 0;color:var(--muted);font-size:.9rem}
+.actions{display:flex;gap:10px;flex-wrap:wrap}.actions>button{flex:1;min-width:140px}
+details summary{cursor:pointer;font-weight:600}
+input[type=file]{width:100%;margin-top:6px;color:var(--text)}
+.hint{font-size:.82rem;color:var(--muted);margin:6px 0 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Leitor de código de barras → SKU</h1>
+
+<div class="card">
+  <button id="btnCam" style="width:100%">Abrir câmera</button>
+  <button id="btnFoto" class="sec" style="width:100%;margin-top:8px">Tirar foto do código</button>
+  <input id="fileFoto" type="file" accept="image/*" capture="environment" style="display:none">
+  <div id="readerFile" style="display:none"></div>
+  <div id="reader"></div>
+  <div class="msg" id="camMsg"></div>
+
+  <label for="code">Código de barras</label>
+  <input id="code" type="text" inputmode="numeric" autocomplete="off" placeholder="Leia pela câmera ou digite">
+  <label for="sku">SKU</label>
+  <input id="sku" type="text" autocomplete="off" list="skuList" placeholder="Preenchido automaticamente se já conhecido">
+  <datalist id="skuList"></datalist>
+  <div class="prod" id="prod"></div>
+  <label for="qty">Quantidade</label>
+  <div class="row">
+    <input id="qty" type="number" inputmode="numeric" min="1" step="1" value="1">
+    <button id="btnAdd">Adicionar</button>
+  </div>
+  <div class="msg" id="addMsg"></div>
+</div>
+
+<div class="card">
+  <div class="total"><span id="cntItens">0 SKUs</span><span id="cntTotal">Total: 0</span></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>SKU</th><th>Qtd</th><th></th></tr></thead>
+      <tbody id="lista"></tbody>
+    </table>
+  </div>
+  <div class="actions" style="margin-top:12px">
+    <button id="btnXlsx">Exportar para o sistema (Excel)</button>
+    <button id="btnClear" class="sec">Limpar contagem</button>
+  </div>
+  <div class="msg" id="expMsg"></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Cadastro: SKUs e códigos de barras</summary>
+    <p class="hint" id="cadInfo"></p>
+    <label for="fileCad">Importar lista de SKUs (Lista de Estoque) ou tabela código de barras → SKU</label>
+    <input id="fileCad" type="file" accept=".xlsx,.xls,.csv">
+    <p class="hint">Aceita colunas SKU, Título e, se houver, Código de barras (EAN/GTIN). Códigos novos lidos na câmera são associados ao SKU na primeira leitura e lembrados depois.</p>
+    <div class="actions" style="margin-top:10px">
+      <button id="btnMapCsv" class="sec">Exportar tabela código → SKU</button>
+      <button id="btnMapClear" class="sec">Apagar associações</button>
+    </div>
+    <div class="msg" id="cadMsg"></div>
+  </details>
+</div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function(){
+  var K_ITEMS="lcb-items-v2",K_MAP="lcb-map-v2",K_CAT="lcb-cat-v2";
+  var items=[];   // {sku, qty}
+  var map={};     // codigo de barras -> sku
+  var cat={};     // sku -> titulo
+  var scanner=null,scanning=false,locked=false;
+  var $=function(id){return document.getElementById(id)};
+
+  function ld(k,def){try{var r=localStorage.getItem(k);if(r){var v=JSON.parse(r);if(v)return v;}}catch(e){}return def;}
+  function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+  function say(id,t,cls){var el=$(id);el.textContent=t||"";el.className="msg"+(cls?" "+cls:"");}
+  function norm(s){return String(s==null?"":s).trim();}
+
+  function fillDatalist(){
+    var dl=$("skuList");dl.textContent="";
+    Object.keys(cat).slice(0,5000).forEach(function(s){var o=document.createElement("option");o.value=s;o.label=cat[s]||"";dl.appendChild(o);});
+    var n=Object.keys(cat).length,m=Object.keys(map).length;
+    $("cadInfo").textContent=n+" SKUs no cadastro · "+m+" códigos de barras associados";
+  }
+
+  function render(){
+    var tb=$("lista");tb.textContent="";var total=0;
+    items.forEach(function(it,i){
+      total+=it.qty;
+      var tr=document.createElement("tr");
+      var c1=document.createElement("td");c1.textContent=it.sku;
+      if(cat[it.sku]){var sm=document.createElement("small");sm.textContent=cat[it.sku];c1.appendChild(sm);}
+      var c2=document.createElement("td");
+      var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="1";inp.inputMode="numeric";inp.value=it.qty;
+      inp.addEventListener("change",function(){var v=parseInt(inp.value,10);if(isNaN(v)||v<0){inp.value=it.qty;return;}it.qty=v;sv(K_ITEMS,items);render();});
+      c2.appendChild(inp);
+      var c3=document.createElement("td");
+      var b=document.createElement("button");b.className="del";b.textContent="Remover";
+      b.addEventListener("click",function(){items.splice(i,1);sv(K_ITEMS,items);render();});
+      c3.appendChild(b);
+      tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tb.appendChild(tr);
+    });
+    $("cntItens").textContent=items.length+(items.length===1?" SKU":" SKUs");
+    $("cntTotal").textContent="Total: "+total;
+  }
+
+  function lookup(){
+    var code=norm($("code").value);
+    if(!code){$("prod").textContent="";return;}
+    var sku=map[code];
+    if(!sku&&cat[code]) sku=code; // etiqueta já traz o SKU
+    if(sku){
+      $("sku").value=sku;
+      $("prod").textContent=(cat[sku]?cat[sku]:"SKU conhecido");
+    }else{
+      $("sku").value="";
+      $("prod").textContent="Código novo: informe o SKU uma vez e ele será lembrado.";
+    }
+  }
+  function onSkuInput(){var s=norm($("sku").value);if(s&&cat[s])$("prod").textContent=cat[s];}
+
+  function addItem(){
+    var code=norm($("code").value),sku=norm($("sku").value);
+    var qty=parseInt($("qty").value,10);
+    if(!sku){say("addMsg","Informe o SKU (ou leia um código já associado).","err");return;}
+    if(isNaN(qty)||qty<=0){say("addMsg","Quantidade inválida.","err");return;}
+    var novoMap=false;
+    if(code&&code!==sku&&map[code]!==sku){novoMap=!map[code];map[code]=sku;sv(K_MAP,map);}
+    var found=items.find(function(x){return x.sku===sku});
+    var antes=found?found.qty:0;
+    if(found)found.qty+=qty;else items.push({sku:sku,qty:qty});
+    sv(K_ITEMS,items);render();fillDatalist();
+    var txt=found?"SKU já existia: "+antes+" + "+qty+" = "+found.qty+" ("+sku+")":"Adicionado: "+sku+" (qtd "+qty+")";
+    if(novoMap)txt+=" · código associado ao SKU";
+    say("addMsg",txt,"ok");
+    $("code").value="";$("sku").value="";$("prod").textContent="";$("qty").value="1";
+    locked=false;
+    if(scanning&&scanner){try{scanner.resume();}catch(e){}}else $("code").focus();
+  }
+
+  function onScan(text){
+    if(locked)return;locked=true;
+    $("code").value=text;lookup();
+    if(scanner){try{scanner.pause(true);}catch(e){}}
+    var known=!!norm($("sku").value);
+    say("addMsg",known?"Código lido: "+text+". Informe a quantidade.":"Código lido: "+text+". Informe o SKU e a quantidade.","ok");
+    var f=known?$("qty"):$("sku");f.focus();if(f.select)f.select();
+    try{if(navigator.vibrate)navigator.vibrate(60);}catch(e){}
+  }
+
+  function startCam(){
+    if(typeof Html5Qrcode==="undefined"){say("camMsg","Biblioteca da câmera não carregou. Digite o código manualmente.","err");return;}
+    $("reader").style.display="block";
+    var F=Html5QrcodeSupportedFormats;
+    scanner=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.QR_CODE],useBarCodeDetectorIfSupported:true});
+    scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:140}},onScan,function(){})
+      .then(function(){scanning=true;$("btnCam").textContent="Fechar câmera";say("camMsg","Aponte para o código de barras.");})
+      .catch(function(err){$("reader").style.display="none";scanner=null;scanning=false;
+        var nm=(err&&(err.name||err.message))||String(err);
+        say("camMsg","Câmera ao vivo indisponível ("+nm+"). Use \"Tirar foto do código\", ou abra a página por HTTPS fora do preview.","err");});
+  }
+  function stopCam(){
+    if(!scanner)return;
+    var s=scanner;scanner=null;scanning=false;locked=false;
+    s.stop().catch(function(){}).then(function(){try{s.clear();}catch(e){}});
+    $("reader").style.display="none";$("btnCam").textContent="Abrir câmera";say("camMsg","");
+  }
+
+  function stamp(){var d=new Date();function p(n){return String(n).padStart(2,"0")}return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());}
+  async function offer(filename,data,msgId){
+    var dl=null;try{dl=await claude.use("downloads");}catch(e){}
+    if(!dl){try{var bl=new Blob([data],{type:"application/octet-stream"});var u=URL.createObjectURL(bl);var a=document.createElement("a");a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);say(msgId,"Arquivo baixado: "+filename,"ok");}catch(e){say(msgId,"Download indisponível neste ambiente.","err");}return;}
+    try{await dl.save({filename:filename,data:data});say(msgId,"Arquivo salvo: "+filename,"ok");}
+    catch(e){if(e&&e.code==="declined")say(msgId,"Download cancelado.");else say(msgId,"Não foi possível salvar o arquivo.","err");}
+  }
+
+  // Exporta no modelo do sistema (Update_warehouse_SKU01)
+  var H=["SKU*","Estoque Baixo\n(Não será atualizado se não for preenchido)","Qtd. Total Atualizado\n(Não será atualizado se não for preenchido)","Custo Médio Atualizado\n(Não será atualizado se não for preenchido)"];
+  function exportXlsx(){
+    if(!items.length){say("expMsg","Nada para exportar.","err");return;}
+    if(typeof XLSX==="undefined"){say("expMsg","Biblioteca do Excel não carregou.","err");return;}
+    var rows=[H].concat(items.map(function(x){return [x.sku,null,x.qty,null]}));
+    var ws=XLSX.utils.aoa_to_sheet(rows);
+    items.forEach(function(x,i){var c=ws["A"+(i+2)];if(c){c.t="s";c.v=String(x.sku);}});
+    ws["!cols"]=[{wch:24},{wch:26},{wch:26},{wch:26}];
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Sheet1");
+    offer("Update_warehouse_SKU-"+stamp()+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}),"expMsg");
+  }
+
+  function exportMap(){
+    var ks=Object.keys(map);
+    if(!ks.length){say("cadMsg","Nenhuma associação para exportar.","err");return;}
+    var lines=["Código de barras;SKU"].concat(ks.map(function(k){return '"'+k.replace(/"/g,'""')+'";"'+String(map[k]).replace(/"/g,'""')+'"'}));
+    offer("codigo-barras-sku-"+stamp()+".csv","\uFEFF"+lines.join("\r\n"),"cadMsg");
+  }
+
+  function importCad(file){
+    if(!file)return;
+    if(typeof XLSX==="undefined"){say("cadMsg","Biblioteca do Excel não carregou.","err");return;}
+    var fr=new FileReader();
+    fr.onload=function(){
+      try{
+        var wb=XLSX.read(fr.result,{type:"array"});
+        var rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
+        if(!rows.length)throw new Error("vazio");
+        var h=rows[0].map(function(x){return String(x).toLowerCase().replace(/[*\n].*$/,"").trim()});
+        function idx(re){for(var i=0;i<h.length;i++){if(re.test(h[i]))return i;}return -1;}
+        var iS=idx(/^sku$/),iT=idx(/t[ií]tulo|^nome|descri/),iB=idx(/barras|^ean|gtin|barcode/);
+        if(iS<0){say("cadMsg","Não encontrei a coluna SKU no arquivo.","err");return;}
+        var nS=0,nB=0;
+        for(var r=1;r<rows.length;r++){
+          var sku=norm(rows[r][iS]);if(!sku)continue;
+          if(!(sku in cat))nS++;
+          cat[sku]=iT>=0?norm(rows[r][iT]):(cat[sku]||"");
+          if(iB>=0){var b=norm(rows[r][iB]);if(b){map[b]=sku;nB++;}}
+        }
+        sv(K_CAT,cat);sv(K_MAP,map);fillDatalist();render();
+        say("cadMsg",nS+" SKUs novos importados"+(iB>=0?" · "+nB+" códigos de barras associados":" · o arquivo não tem coluna de código de barras"),"ok");
+      }catch(e){say("cadMsg","Não consegui ler este arquivo.","err");}
+    };
+    fr.readAsArrayBuffer(file);
+  }
+
+  $("btnFoto").addEventListener("click",function(){$("fileFoto").click();});
+  $("fileFoto").addEventListener("change",function(e){
+    var f=e.target.files[0];e.target.value="";if(!f)return;
+    if(typeof Html5Qrcode==="undefined"){say("camMsg","Biblioteca não carregou. Digite o código.","err");return;}
+    say("camMsg","Lendo imagem…");
+    var F=Html5QrcodeSupportedFormats;
+    var r=new Html5Qrcode("readerFile",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.QR_CODE],useBarCodeDetectorIfSupported:true});
+    r.scanFile(f,false).then(function(t){locked=false;say("camMsg","");onScan(t);locked=false;})
+     .catch(function(){say("camMsg","Não achei código na foto. Aproxime, foque e tente de novo.","err");})
+     .then(function(){try{r.clear();}catch(x){}});
+  });
+  $("btnCam").addEventListener("click",function(){scanning?stopCam():startCam();});
+  $("btnAdd").addEventListener("click",addItem);
+  $("code").addEventListener("change",lookup);
+  $("code").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();lookup();var f=norm($("sku").value)?$("qty"):$("sku");f.focus();if(f.select)f.select();}});
+  $("sku").addEventListener("input",onSkuInput);
+  $("sku").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("qty").focus();$("qty").select();}});
+  $("qty").addEventListener("keydown",function(e){if(e.key==="Enter")addItem();});
+  $("btnXlsx").addEventListener("click",exportXlsx);
+  $("btnClear").addEventListener("click",function(){if(!items.length)return;if(confirm("Apagar toda a contagem atual? As associações de códigos são mantidas.")){items=[];sv(K_ITEMS,items);render();say("expMsg","");}});
+  $("fileCad").addEventListener("change",function(e){importCad(e.target.files[0]);e.target.value="";});
+  $("btnMapCsv").addEventListener("click",exportMap);
+  $("btnMapClear").addEventListener("click",function(){if(confirm("Apagar todas as associações código de barras → SKU?")){map={};sv(K_MAP,map);fillDatalist();say("cadMsg","Associações apagadas.");}});
+
+  items=ld(K_ITEMS,[]);map=ld(K_MAP,{});cat=ld(K_CAT,{});
+  if(!Array.isArray(items))items=[];
+  fillDatalist();render();
+})();
+</script>
+</body>
+</html>
