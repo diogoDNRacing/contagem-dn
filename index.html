@@ -39,7 +39,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 </head>
 <body>
 <main>
-<h1>Leitor de código de barras → SKU</h1>
+<h1 style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Leitor de código de barras → SKU</span><button id="btnTema" class="sec" style="padding:6px 10px;font-size:.85rem;white-space:nowrap" type="button"></button></h1>
 <div class="hint" id="sync" style="margin:-6px 0 10px">Conectando…</div>
 
 <div class="card">
@@ -89,6 +89,17 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     <div class="actions" style="margin-top:10px">
       <button id="btnMapCsv" class="sec">Exportar tabela código → SKU</button>
       <button id="btnMapClear" class="sec">Apagar associações</button>
+    </div>
+    <button id="btnCatDel" class="sec" type="button" style="width:100%;margin-top:10px;color:var(--danger)">Apagar cadastro de SKUs…</button>
+    <div id="delBox" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--danger);border-radius:10px">
+      <p class="hint" style="margin:0 0 8px"><b>Atenção:</b> isso apaga o cadastro de SKUs <b>para todos os usuários</b>. Recomendado exportar a tabela código → SKU antes. A contagem atual não é afetada.</p>
+      <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="delMap" style="width:auto"> Apagar também as associações de código de barras</label>
+      <label for="delTxt">Digite APAGAR para confirmar</label>
+      <input id="delTxt" type="text" autocomplete="off" autocapitalize="characters" placeholder="APAGAR">
+      <div class="row" style="margin-top:10px">
+        <button id="btnDelOk" type="button" disabled style="background:var(--danger);color:#fff;opacity:.45">Confirmar exclusão</button>
+        <button id="btnDelCancel" class="sec" type="button">Cancelar</button>
+      </div>
     </div>
     <div class="msg" id="cadMsg"></div>
   </details>
@@ -297,6 +308,21 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     fr.readAsArrayBuffer(file);
   }
 
+  function fechaDel(){$("delBox").style.display="none";$("delTxt").value="";$("delMap").checked=false;$("btnDelOk").disabled=true;$("btnDelOk").style.opacity=".45";}
+  $("btnCatDel").addEventListener("click",function(){var b=$("delBox");if(b.style.display==="block"){fechaDel();}else{b.style.display="block";$("delTxt").focus();}});
+  $("btnDelCancel").addEventListener("click",fechaDel);
+  $("delTxt").addEventListener("input",function(){var ok=$("delTxt").value.trim().toUpperCase()==="APAGAR";$("btnDelOk").disabled=!ok;$("btnDelOk").style.opacity=ok?"1":".45";});
+  $("btnDelOk").addEventListener("click",async function(){
+    if($("delTxt").value.trim().toUpperCase()!=="APAGAR")return;
+    var comMap=$("delMap").checked;
+    $("btnDelOk").disabled=true;say("cadMsg","Apagando…");
+    var r=await sb.from("catalogo").delete().neq("sku","");
+    if(r.error){say("cadMsg","Erro ao apagar: "+r.error.message,"err");fechaDel();return;}
+    cat={};
+    if(comMap){var r2=await sb.from("codigos").delete().neq("codigo","");if(r2.error){say("cadMsg","SKUs apagados, mas erro nas associações: "+r2.error.message,"err");fillDatalist();render();fechaDel();return;}map={};}
+    fillDatalist();render();fechaDel();
+    say("cadMsg",comMap?"Cadastro de SKUs e associações apagados.":"Cadastro de SKUs apagado.","ok");
+  });
   $("btnFoto").addEventListener("click",function(){$("fileFoto").click();});
   $("fileFoto").addEventListener("change",function(e){
     var f=e.target.files[0];e.target.value="";if(!f)return;
@@ -322,6 +348,16 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   $("btnMapClear").addEventListener("click",function(){if(confirm("Apagar todas as associações código de barras → SKU?")){map={};db(sb.from("codigos").delete().neq("codigo",""));fillDatalist();say("cadMsg","Associações apagadas.");}});
 
   fillDatalist();render();start();
+})();
+</script>
+<script>
+(function(){
+  var b=document.getElementById("btnTema"),r=document.documentElement,K="lcb-tema";
+  function atual(){var t=r.getAttribute("data-theme");if(t)return t;return window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
+  function rotulo(){b.textContent=atual()==="dark"?"☀ Claro":"🌙 Escuro";}
+  try{var sv=localStorage.getItem(K);if(sv==="dark"||sv==="light")r.setAttribute("data-theme",sv);}catch(e){}
+  rotulo();
+  b.addEventListener("click",function(){var n=atual()==="dark"?"light":"dark";r.setAttribute("data-theme",n);try{localStorage.setItem(K,n);}catch(e){}rotulo();});
 })();
 </script>
 </body>
