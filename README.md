@@ -17,7 +17,7 @@ Aplicativo web para **contagem de estoque** com leitura de código de barras pel
 - **Soma sem conflito**: se duas pessoas lerem o mesmo SKU ao mesmo tempo, as quantidades são somadas no servidor, sem uma sobrescrever a outra.
 - Edição e remoção de itens da contagem (refletem para todos).
 - **Importação do cadastro** (`.xlsx`, `.xls` ou `.csv`) com colunas `SKU`, `Título` e, opcionalmente, `Código de barras` / `EAN` / `GTIN`.
-- Exportação da tabela código → SKU em CSV.
+- Exportação da tabela código → SKU no modelo de importação do sistema (`Atualizar Único Variantes`), com SKU, Descrição e Código de Barras.
 - Tema claro/escuro automático e layout pensado para celular.
 
 ## Arquivos

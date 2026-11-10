@@ -273,11 +273,29 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     offer("Update_warehouse_SKU-"+stamp()+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}),"expMsg");
   }
 
+  // Exporta no modelo "Atualizar Único Variantes" (SKU, Descrição e Código de Barras)
+  var HM=["SKU\n(Obrigatório, não pode ser modificado. É necessário que o SKU já exista na lista de produtos. 1-200 caracteres)", "Título\n(Todos os campos não obrigatórios na tabela, se não preenchidos, não serão atualizados. Se preenchidos, irão sobrescrever a atualização. 1-500 caracteres)", "Apelido do Produto\n(1-500 caracteres)", "Se a NF-e aplica apelido\nUsar o apelido do produto na NF-e? Para \"sim\", insira Y; para \"não\", insira N", "Categoria principal\n(Campos em branco ou inválidos não atualizarão a categoria do produto.)", "Categoria secundária\n(Selecione uma categoria principal primeiro.)", "Data de Lançamento\n（Formato: 23/09/2024 Faixa: Data de criação do produto e posteriores）", "Status da Venda\nO produto está ativo? Se está ativo, insira Y; se está inativo, insira N", "Vendedor\n(Exigido: subconta existente, 1-100 caracteres)", "Código de Barras\n(GTIN/UPC/EAN, se houver múltiplos códigos de barras, por favor, separe-os com \",\")\n", "Apelido de SKU\n（Limite a letras, números e caracteres especiais; separe vários apelidos de SKU com vírgulas; máximo de 20 entradas）", "Preço de varejo\n(0,1-99999999)", "Custo de Compra\n(0,0001-99999999)", "Descrição\n(0-1000 caracteres)", "Link do Fornecedor\n(Link da web, se houver múltiplos links, por favor, separe-os com \"|\", no máximo 5)", "Marca\n（0-100 caracteres)", "Peso(g)\n(1-999999)", "Comprimento (cm)\n(1-999999)", "Largura (cm)\n(1-999999)", "Altura (cm)\n(1-999999)", "Imagens do Anúncio\n(Link da imagem, apenas suporta imagens nos formatos JPG, JPEG, PNG, com tamanho máximo de 2MB. Para múltiplas imagens, use \"|\" para separá-las, no máximo 15 imagens.)", "Link do Vídeo\n（Somente um link）", "NCM\n(8 dígitos)", "CEST\n(7 dígitos)", "Unidade\n(Por exemplo, UN/KG/Par)", "Origem\n(Selecione 0/1/2/3/4/5/6/7/8)"];
+  var WM=[24, 32, 24, 27, 30, 13, 22, 17, 14, 27, 13, 16, 17, 17, 19, 13, 9, 17, 13, 15, 37, 17, 9, 13, 15, 58];
   function exportMap(){
-    var ks=Object.keys(map);
-    if(!ks.length){say("cadMsg","Nenhuma associação para exportar.","err");return;}
-    var lines=["Código de barras;SKU"].concat(ks.map(function(k){return '"'+k.replace(/"/g,'""')+'";"'+String(map[k]).replace(/"/g,'""')+'"'}));
-    offer("codigo-barras-sku-"+stamp()+".csv","\uFEFF"+lines.join("\r\n"),"cadMsg");
+    var by={};
+    Object.keys(map).forEach(function(c){var k=map[c];(by[k]=by[k]||[]).push(c);});
+    var skus=Object.keys(by).sort();
+    if(!skus.length){say("cadMsg","Nenhuma associação para exportar.","err");return;}
+    if(typeof XLSX==="undefined"){say("cadMsg","Biblioteca do Excel não carregou.","err");return;}
+    var rows=[HM].concat(skus.map(function(k){
+      var r=new Array(HM.length).fill(null);
+      r[0]=k;                      // SKU
+      r[9]=by[k].join(",");        // Código de Barras (vários separados por vírgula)
+      r[13]=cat[k]||null;          // Descrição
+      return r;
+    }));
+    var ws=XLSX.utils.aoa_to_sheet(rows);
+    skus.forEach(function(k,i){
+      ["A","J","N"].forEach(function(col){var c=ws[col+(i+2)];if(c){c.t="s";c.v=String(c.v);}});
+    });
+    ws["!cols"]=WM.map(function(w){return {wch:w};});
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Atualizar_ Único_Variantes_Mode");
+    offer("Atualizar_Unico_Variantes-"+stamp()+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}),"cadMsg");
   }
 
   function importCad(file){
