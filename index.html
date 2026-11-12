@@ -224,24 +224,46 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     var u={};arr.forEach(function(x){u[x[chave]]=x;});arr=Object.keys(u).map(function(k){return u[k];});
     for(var i=0;i<arr.length;i+=500){var r=await sb.from(tabela).upsert(arr.slice(i,i+500));if(r.error){say("cadMsg","Erro ao salvar no servidor: "+r.error.message,"err");return;}}
   }
+
+  // Busca TODAS as linhas de uma tabela, em páginas de 1000 (limite padrão do Supabase),
+  // com ordem estável para a paginação não pular nem repetir linhas.
+  async function fetchAll(tabela,cols,ordem){
+    var all=[],from=0;
+    while(true){
+      var q=sb.from(tabela).select(cols);
+      ordem.forEach(function(o){q=q.order(o[0],{ascending:o[1]});});
+      var r=await q.range(from,from+999);
+      if(r.error)return {error:r.error};
+      if(!r.data.length)break;
+      all=all.concat(r.data);from+=r.data.length;
+    }
+    return {data:all};
+  }
   async function loadContagem(){
-    var r=await sb.from("contagem").select("sku,qty").order("updated_at",{ascending:false}).limit(10000);
+    var r=await fetchAll("contagem","sku,qty",[["updated_at",false],["sku",true]]);
     if(r.error){$("sync").textContent="Erro: "+r.error.message;return;}
     items=r.data.map(function(x){return {sku:x.sku,qty:x.qty};});render();
   }
   async function loadCodigos(){
-    var r=await sb.from("codigos").select("codigo,sku").limit(100000);
+    var r=await fetchAll("codigos","codigo,sku",[["codigo",true]]);
     if(r.error)return;map={};r.data.forEach(function(x){map[x.codigo]=x.sku;});fillDatalist();
   }
   async function loadCatalogo(){
-    var all=[],from=0;
-    while(true){var r=await sb.from("catalogo").select("sku,titulo").range(from,from+999);
-      if(r.error)return;all=all.concat(r.data);if(r.data.length<1000)break;from+=1000;}
-    cat={};all.forEach(function(x){cat[x.sku]=x.titulo||"";});fillDatalist();render();
+    var r=await fetchAll("catalogo","sku,titulo",[["sku",true]]);
+    if(r.error){
+      // Falhou: mantém o que já está na tela (cópia local) em vez de ficar sem descrições.
+      $("sync").textContent="Erro ao carregar o cadastro: "+r.error.message;return;
+    }
+    cat={};r.data.forEach(function(x){cat[x.sku]=x.titulo||"";});
+    try{localStorage.setItem(K_CAT,JSON.stringify(cat));}catch(e){}
+    fillDatalist();render();onSkuInput();
   }
   function start(){
     if(typeof supabase==="undefined"||SUPABASE_URL.indexOf("COLE_AQUI")>=0){$("sync").textContent="Configure SUPABASE_URL e SUPABASE_KEY no arquivo.";$("sync").style.color="var(--danger)";return;}
     sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    // Mostra já as descrições da última carga bem-sucedida enquanto o servidor responde.
+    var cache=ld(K_CAT,null);
+    if(cache&&typeof cache==="object"){cat=cache;fillDatalist();render();}
     Promise.all([loadCodigos(),loadCatalogo(),loadContagem()]);
     var t={};
     function deb(nome,fn){clearTimeout(t[nome]);t[nome]=setTimeout(fn,300);}
@@ -309,14 +331,18 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
         if(!rows.length)throw new Error("vazio");
         var h=rows[0].map(function(x){return String(x).toLowerCase().replace(/[*\n].*$/,"").trim()});
         function idx(re){for(var i=0;i<h.length;i++){if(re.test(h[i]))return i;}return -1;}
-        var iS=idx(/^sku$/),iT=idx(/t[ií]tulo|^nome|descri/),iB=idx(/barras|^ean|gtin|barcode/);
+        // Título e Descrição são colunas distintas: usa o Título e, se estiver vazio, a Descrição.
+        var iS=idx(/^sku$/),iT=idx(/^t[ií]tulo|^nome/),iD=idx(/descri/),iB=idx(/barras|^ean|gtin|barcode/);
         if(iS<0){say("cadMsg","Não encontrei a coluna SKU no arquivo.","err");return;}
         var nS=0,nB=0,rc=[],rm=[];
         for(var r=1;r<rows.length;r++){
           var sku=norm(rows[r][iS]);if(!sku)continue;
-          if(!(sku in cat))nS++;
-          cat[sku]=iT>=0?norm(rows[r][iT]):(cat[sku]||"");
-          rc.push({sku:sku,titulo:cat[sku]||""});
+          var novo=!(sku in cat);
+          if(novo)nS++;
+          var tit=(iT>=0?norm(rows[r][iT]):"")||(iD>=0?norm(rows[r][iD]):"");
+          // Nunca sobrescreve um título existente com vazio.
+          if(tit){cat[sku]=tit;rc.push({sku:sku,titulo:tit});}
+          else if(novo){cat[sku]="";rc.push({sku:sku,titulo:""});}
           if(iB>=0){var b=norm(rows[r][iB]);if(b){map[b]=sku;rm.push({codigo:b,sku:sku});nB++;}}
         }
         fillDatalist();render();up("catalogo",rc,"sku");up("codigos",rm,"codigo");
