@@ -35,6 +35,18 @@ td input{padding:6px 8px;width:80px}
 details summary{cursor:pointer;font-weight:600}
 input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 .hint{font-size:.82rem;color:var(--muted);margin:6px 0 0}
+.modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.6);backdrop-filter:blur(3px)}
+.modal.on{display:flex}
+.modal-box{width:100%;max-width:380px;background:var(--card);border:2px solid var(--danger);border-radius:16px;padding:22px 18px 18px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.45);animation:pop .18s ease-out}
+.modal-ico{font-size:2.4rem;line-height:1}
+.modal-box h2{margin:8px 0 4px;font-size:1.2rem;color:var(--danger)}
+.modal-sku{margin:12px 0;padding:10px;border-radius:10px;background:var(--bg);border:1px solid var(--line)}
+.modal-sku b{display:block;font-size:1.1rem}
+.modal-sku span{display:block;font-size:.82rem;color:var(--muted);margin-top:2px}
+.modal-sku em{display:block;font-style:normal;font-weight:600;margin-top:6px}
+.modal-box .hint{margin:0 0 14px}
+.btn-danger{background:var(--danger);color:#fff}
+@keyframes pop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
 </style>
 </head>
 <body>
@@ -106,6 +118,23 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 </div>
 </main>
 
+<div class="modal" id="modalDel" role="dialog" aria-modal="true" aria-labelledby="mdTitulo">
+  <div class="modal-box">
+    <div class="modal-ico">⚠️</div>
+    <h2 id="mdTitulo">Remover este SKU?</h2>
+    <div class="modal-sku">
+      <b id="mdSku"></b>
+      <span id="mdTit"></span>
+      <em id="mdQtd"></em>
+    </div>
+    <p class="hint">Ele será removido da contagem de <b>todos os usuários</b>.</p>
+    <div class="row">
+      <button id="mdCancel" class="sec" type="button">Cancelar</button>
+      <button id="mdOk" class="btn-danger" type="button">Sim, remover</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -135,6 +164,25 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     $("cadInfo").textContent=n+" SKUs no cadastro · "+m+" códigos de barras associados";
   }
 
+  function confirmaRemover(it,ok){
+    var m=$("modalDel");
+    $("mdSku").textContent=it.sku;
+    $("mdTit").textContent=cat[it.sku]||"";
+    $("mdQtd").textContent="Quantidade: "+it.qty;
+    function esc(e){if(e.key==="Escape")fecha();}
+    function fecha(){
+      m.classList.remove("on");
+      document.removeEventListener("keydown",esc);
+      $("mdOk").onclick=$("mdCancel").onclick=m.onclick=null;
+    }
+    $("mdCancel").onclick=fecha;
+    $("mdOk").onclick=function(){fecha();ok();};
+    m.onclick=function(e){if(e.target===m)fecha();};
+    document.addEventListener("keydown",esc);
+    m.classList.add("on");
+    $("mdCancel").focus();
+  }
+
   function render(){
     var tb=$("lista");tb.textContent="";var total=0;
     items.forEach(function(it,i){
@@ -148,7 +196,14 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
       c2.appendChild(inp);
       var c3=document.createElement("td");
       var b=document.createElement("button");b.className="del";b.textContent="Remover";
-      b.addEventListener("click",function(){var sk=it.sku;items.splice(i,1);render();db(sb.from("contagem").delete().eq("sku",sk));});
+      b.addEventListener("click",function(){
+        confirmaRemover(it,function(){
+          var sk=it.sku,j=items.indexOf(it);
+          if(j>-1)items.splice(j,1);
+          render();
+          db(sb.from("contagem").delete().eq("sku",sk));
+        });
+      });
       c3.appendChild(b);
       tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tb.appendChild(tr);
     });
