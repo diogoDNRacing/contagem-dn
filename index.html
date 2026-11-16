@@ -47,6 +47,13 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 .modal-box .hint{margin:0 0 14px}
 .btn-danger{background:var(--danger);color:#fff}
 @keyframes pop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
+.sugg{display:none;margin-top:6px;max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.sugg.on{display:block}
+.sugg button{display:block;width:100%;text-align:left;background:transparent;color:var(--text);border-radius:0;border-bottom:1px solid var(--line);padding:10px 12px;font-weight:400}
+.sugg button:last-of-type{border-bottom:0}
+.sugg button b{display:block}
+.sugg button small{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
+.sugg .nada{padding:10px 12px;color:var(--muted);font-size:.85rem}
 </style>
 </head>
 <body>
@@ -64,9 +71,9 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 
   <label for="code">Código de barras</label>
   <input id="code" type="text" inputmode="numeric" autocomplete="off" placeholder="Leia pela câmera ou digite">
-  <label for="sku">SKU</label>
-  <input id="sku" type="text" autocomplete="off" list="skuList" placeholder="Preenchido automaticamente se já conhecido">
-  <datalist id="skuList"></datalist>
+  <label for="sku">SKU ou título do produto</label>
+  <input id="sku" type="text" autocomplete="off" placeholder="Digite o SKU ou parte do título para buscar">
+  <div class="sugg" id="sugg"></div>
   <div class="prod" id="prod"></div>
   <label for="qty">Quantidade</label>
   <div class="row">
@@ -156,10 +163,11 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   function sv(){}
   function say(id,t,cls){var el=$(id);el.textContent=t||"";el.className="msg"+(cls?" "+cls:"");}
   function norm(s){return String(s==null?"":s).trim();}
+  function semAcento(s){return String(s==null?"":s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();}
+  var idxBusca=[],tBusca=null;
 
   function fillDatalist(){
-    var dl=$("skuList");dl.textContent="";
-    Object.keys(cat).slice(0,5000).forEach(function(s){var o=document.createElement("option");o.value=s;o.label=cat[s]||"";dl.appendChild(o);});
+    idxBusca=Object.keys(cat).map(function(s){return {sku:s,sn:semAcento(s),txt:semAcento(s+" "+(cat[s]||""))};});
     var n=Object.keys(cat).length,m=Object.keys(map).length;
     $("cadInfo").textContent=n+" SKUs no cadastro · "+m+" códigos de barras associados";
   }
@@ -212,6 +220,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   }
 
   function lookup(){
+    fechaSugg();
     var code=norm($("code").value);
     if(!code){$("prod").textContent="";return;}
     var sku=map[code];
@@ -225,6 +234,50 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     }
   }
   function onSkuInput(){var s=norm($("sku").value);if(s&&cat[s])$("prod").textContent=cat[s];}
+
+  // ===== Busca por título (ou SKU): cada palavra digitada precisa aparecer em qualquer parte do texto =====
+  function fechaSugg(){clearTimeout(tBusca);var b=$("sugg");b.classList.remove("on");b.textContent="";}
+  function escolheSku(sku){
+    fechaSugg();
+    $("sku").value=sku;
+    $("prod").textContent=cat[sku]||"SKU conhecido";
+    var q=$("qty");q.focus();if(q.select)q.select();
+  }
+  function buscar(){
+    var q=semAcento(norm($("sku").value)),box=$("sugg");
+    if(q.length<2){fechaSugg();return;}
+    var toks=q.split(/\s+/).filter(Boolean),res=[];
+    for(var i=0;i<idxBusca.length;i++){
+      var x=idxBusca[i],ok=true;
+      for(var j=0;j<toks.length;j++){if(x.txt.indexOf(toks[j])<0){ok=false;break;}}
+      if(ok)res.push(x);
+    }
+    box.textContent="";
+    if(!res.length){
+      var n=document.createElement("div");n.className="nada";n.textContent="Nenhum produto encontrado para esta busca.";
+      box.appendChild(n);box.classList.add("on");return;
+    }
+    // SKUs que começam com o texto digitado aparecem primeiro
+    res.sort(function(a,b){return (a.sn.indexOf(q)===0?0:1)-(b.sn.indexOf(q)===0?0:1);});
+    res.slice(0,30).forEach(function(x){
+      var b=document.createElement("button");b.type="button";
+      var t=document.createElement("b");t.textContent=x.sku;b.appendChild(t);
+      if(cat[x.sku]){var sm=document.createElement("small");sm.textContent=cat[x.sku];b.appendChild(sm);}
+      b.addEventListener("click",function(){escolheSku(x.sku);});
+      box.appendChild(b);
+    });
+    if(res.length>30){
+      var mais=document.createElement("div");mais.className="nada";
+      mais.textContent="Mostrando 30 de "+res.length+". Digite mais letras para refinar.";
+      box.appendChild(mais);
+    }
+    box.classList.add("on");
+  }
+  function digitouSku(){
+    clearTimeout(tBusca);
+    if(norm($("sku").value).length<2){fechaSugg();return;}
+    tBusca=setTimeout(buscar,300);
+  }
 
   function addItem(){
     var code=norm($("code").value),sku=norm($("sku").value);
@@ -241,6 +294,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     var txt=found?"SKU já existia: "+antes+" + "+qty+" = "+found.qty+" ("+sku+")":"Adicionado: "+sku+" (qtd "+qty+")";
     if(novoMap)txt+=" · código associado ao SKU";
     say("addMsg",txt,"ok");
+    fechaSugg();
     $("code").value="";$("sku").value="";$("prod").textContent="";$("qty").value="1";
     locked=false;
     if(scanning&&scanner){try{scanner.resume();}catch(e){}}else $("code").focus();
@@ -437,8 +491,9 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   $("btnAdd").addEventListener("click",addItem);
   $("code").addEventListener("change",lookup);
   $("code").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();lookup();var f=norm($("sku").value)?$("qty"):$("sku");f.focus();if(f.select)f.select();}});
-  $("sku").addEventListener("input",onSkuInput);
-  $("sku").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("qty").focus();$("qty").select();}});
+  $("sku").addEventListener("input",function(){onSkuInput();digitouSku();});
+  $("sku").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();fechaSugg();$("qty").focus();$("qty").select();}});
+  document.addEventListener("click",function(e){if(!e.target.closest("#sugg")&&e.target!==$("sku"))fechaSugg();});
   $("qty").addEventListener("keydown",function(e){if(e.key==="Enter")addItem();});
   $("btnXlsx").addEventListener("click",exportXlsx);
   $("btnClear").addEventListener("click",function(){if(!items.length)return;if(confirm("Apagar TODA a contagem para TODOS os usuários? As associações de códigos são mantidas.")){items=[];render();db(sb.from("contagem").delete().neq("sku",""));say("expMsg","");}});
