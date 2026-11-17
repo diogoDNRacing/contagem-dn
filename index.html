@@ -54,6 +54,7 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 .sugg button b{display:block}
 .sugg button small{display:block;color:var(--muted);font-size:.78rem;margin-top:2px}
 .sugg .nada{padding:10px 12px;color:var(--muted);font-size:.85rem}
+  .selSis{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit;font:inherit}
 </style>
 </head>
 <body>
@@ -91,8 +92,13 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
       <tbody id="lista"></tbody>
     </table>
   </div>
+  <label for="selExp" style="margin-top:12px">Sistema de destino</label>
+  <select id="selExp" class="selSis">
+    <option value="blingcsv">Bling (CSV, modelo de produtos)</option>
+    <option value="upseller">UpSeller</option>
+  </select>
   <div class="actions" style="margin-top:12px">
-    <button id="btnXlsx">Exportar para o sistema (Excel)</button>
+    <button id="btnXlsx">Exportar para o sistema</button>
     <button id="btnClear" class="sec">Limpar contagem</button>
   </div>
   <div class="msg" id="expMsg"></div>
@@ -102,7 +108,12 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
   <details>
     <summary>Cadastro: SKUs e códigos de barras</summary>
     <p class="hint" id="cadInfo"></p>
-    <label for="fileCad">Importar lista de SKUs (Lista de Estoque) ou tabela código de barras → SKU</label>
+    <label for="selCad">Sistema (importação e exportação do cadastro)</label>
+    <select id="selCad" class="selSis">
+      <option value="upseller">UpSeller</option>
+      <option value="bling">Bling</option>
+    </select>
+    <label for="fileCad" style="margin-top:10px">Importar lista de SKUs (Lista de Estoque) ou tabela código de barras → SKU</label>
     <input id="fileCad" type="file" accept=".xlsx,.xls,.csv">
     <p class="hint">Aceita colunas SKU, Título e, se houver, Código de barras (EAN/GTIN). Códigos novos lidos na câmera são associados ao SKU na primeira leitura e lembrados depois.</p>
     <div class="actions" style="margin-top:10px">
@@ -393,15 +404,40 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
 
   // Exporta no modelo do sistema (Update_warehouse_SKU01)
   var H=["SKU*","Estoque Baixo\n(Não será atualizado se não for preenchido)","Qtd. Total Atualizado\n(Não será atualizado se não for preenchido)","Custo Médio Atualizado\n(Não será atualizado se não for preenchido)"];
+  // Bling: modelo de produtos (mesmas 59 colunas do CSV exportado pelo Bling, separador ";", UTF-8 com BOM)
+  var HP=["ID", "Código", "Descrição", "Unidade", "NCM", "Origem", "Preço", "Valor IPI fixo", "Observações", "Situação", "Estoque", "Preço de custo", "Cód. no fornecedor", "Fornecedor", "Localização", "Estoque máximo", "Estoque mínimo", "Peso líquido (Kg)", "Peso bruto (Kg)", "GTIN/EAN", "GTIN/EAN da Embalagem", "Largura do produto", "Altura do Produto", "Profundidade do produto", "Data Validade", "Descrição do Produto no Fornecedor", "Descrição Complementar", "Itens p/ caixa", "Produto Variação", "Tipo Produção", "Classe de enquadramento do IPI", "Código na Lista de Serviços", "Tipo do item", "Grupo de Tags/Tags", "Tributos", "Código Pai", "Código Integração", "Grupo de produtos", "Marca", "CEST", "Volumes", "Descrição Curta", "Cross-Docking", "URL Imagens Externas", "Link Externo", "Meses Garantia no Fornecedor", "Clonar dados do pai", "Condição do Produto", "Frete Grátis", "Número FCI", "Vídeo", "Departamento", "Unidade de Medida", "Preço de Compra", "Valor base ICMS ST para retenção", "Valor ICMS ST para retenção", "Valor ICMS próprio do substituto", "Categoria do produto", "Informações Adicionais"];
+  function csvCell(v){return '"'+String(v==null?"":v).replace(/"/g,'""')+'"';}
+  function inv(n){return Number(n).toFixed(2).replace(".",",");}
+  // Monta o CSV no modelo de produtos do Bling. lista: [{sku, qty (opcional)}]
+  function blingCsv(lista,prefixo,msgId){
+    var porSku={};
+    Object.keys(map).forEach(function(c){var k=map[c];(porSku[k]=porSku[k]||[]).push(c);});
+    var iC=HP.indexOf("Código"),iD=HP.indexOf("Descrição"),iE=HP.indexOf("Estoque"),iG=HP.indexOf("GTIN/EAN");
+    var linhas=[HP.map(csvCell).join(";")];
+    lista.forEach(function(x){
+      var r=new Array(HP.length).fill("");
+      r[iC]=x.sku+"\t";                          // tab no fim, como no export do Bling (preserva zeros à esquerda)
+      r[iD]=cat[x.sku]||"";
+      if(x.qty!=null)r[iE]=inv(x.qty);            // quantidade contada (só na exportação da contagem)
+      var g=porSku[x.sku];
+      r[iG]=g?g.join(",")+"\t":"";                // código(s) de barras associado(s)
+      linhas.push(r.map(csvCell).join(";"));
+    });
+    var bytes=new TextEncoder().encode("\ufeff"+linhas.join("\r\n")+"\r\n");
+    offer(prefixo+stamp()+".csv",bytes,msgId);
+  }
+  function exportBlingCsv(){blingCsv(items,"Bling_produtos_contagem-","expMsg");}
   function exportXlsx(){
     if(!items.length){say("expMsg","Nada para exportar.","err");return;}
+    if($("selExp").value==="blingcsv"){exportBlingCsv();return;}
     if(typeof XLSX==="undefined"){say("expMsg","Biblioteca do Excel não carregou.","err");return;}
     var rows=[H].concat(items.map(function(x){return [x.sku,null,x.qty,null]}));
+    var wch=[24,26,26,26],sheet="Sheet1",file="Update_warehouse_SKU-";
     var ws=XLSX.utils.aoa_to_sheet(rows);
     items.forEach(function(x,i){var c=ws["A"+(i+2)];if(c){c.t="s";c.v=String(x.sku);}});
-    ws["!cols"]=[{wch:24},{wch:26},{wch:26},{wch:26}];
-    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Sheet1");
-    offer("Update_warehouse_SKU-"+stamp()+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}),"expMsg");
+    ws["!cols"]=wch.map(function(w){return {wch:w};});
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);
+    offer(file+stamp()+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}),"expMsg");
   }
 
   // Exporta no modelo "Atualizar Único Variantes" (SKU, Descrição e Código de Barras)
@@ -411,8 +447,17 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
     var by={};
     Object.keys(map).forEach(function(c){var k=map[c];(by[k]=by[k]||[]).push(c);});
     var skus=Object.keys(by).sort();
-    if(!skus.length){say("cadMsg","Nenhuma associação para exportar.","err");return;}
-    if(typeof XLSX==="undefined"){say("cadMsg","Biblioteca do Excel não carregou.","err");return;}
+    var bling=$("selCad").value==="bling";
+    if(!skus.length&&!(bling&&Object.keys(cat).length)){say("cadMsg","Nenhuma associação para exportar.","err");return;}
+    if(!bling&&typeof XLSX==="undefined"){say("cadMsg","Biblioteca do Excel não carregou.","err");return;}
+    if(bling){
+      // Bling: todos os registros do cadastro (SKUs com ou sem código de barras) + SKUs que só existem nas associações
+      var todos=Object.keys(cat);
+      skus.forEach(function(k){if(!(k in cat))todos.push(k);});
+      todos.sort();
+      blingCsv(todos.map(function(k){return {sku:k};}),"Bling_produtos_cadastro-","cadMsg");
+      return;
+    }
     var rows=[HM].concat(skus.map(function(k){
       var r=new Array(HM.length).fill(null);
       r[0]=k;                      // SKU
@@ -441,8 +486,13 @@ input[type=file]{width:100%;margin-top:6px;color:var(--text)}
         var h=rows[0].map(function(x){return String(x).toLowerCase().replace(/[*\n].*$/,"").trim()});
         function idx(re){for(var i=0;i<h.length;i++){if(re.test(h[i]))return i;}return -1;}
         // Título e Descrição são colunas distintas: usa o Título e, se estiver vazio, a Descrição.
-        var iS=idx(/^sku$/),iT=idx(/^t[ií]tulo|^nome/),iD=idx(/descri/),iB=idx(/barras|^ean|gtin|barcode/);
-        if(iS<0){say("cadMsg","Não encontrei a coluna SKU no arquivo.","err");return;}
+        var bl=$("selCad").value==="bling";
+        // UpSeller: SKU / Título. Bling: Código / Descrição / GTIN/EAN (ignora "GTIN/EAN da embalagem").
+        var iS=bl?idx(/^c[oó]digo$/):idx(/^sku$/);
+        var iT=bl?idx(/^descri[cç][aã]o$/):idx(/^t[ií]tulo|^nome/);
+        var iD=bl?-1:idx(/descri/);
+        var iB=bl?idx(/^gtin\/ean$|^gtin$|^ean$|barras/):idx(/barras|^ean|gtin|barcode/);
+        if(iS<0){say("cadMsg",bl?"Não encontrei a coluna Código no arquivo (modelo Bling).":"Não encontrei a coluna SKU no arquivo (modelo UpSeller).","err");return;}
         var nS=0,nB=0,rc=[],rm=[];
         for(var r=1;r<rows.length;r++){
           var sku=norm(rows[r][iS]);if(!sku)continue;
